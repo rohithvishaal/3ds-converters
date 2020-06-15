@@ -1,0 +1,87 @@
+Header size             0x00002020
+Type                    0000
+Version                 0000
+Certificates offset:    0x2040
+Certificates size:      0xa00
+Ticket offset:          0x2a40
+Ticket size             0x350
+TMD offset:             0x2dc0
+TMD size:               0xb64
+Meta offset:            0xdd07a940
+Meta size:              0x0
+Content offset:         0x3940
+Content size:           0xdd077000
+
+Ticket content:
+Signature Type:         04000100
+Issuer:                 Root-CA00000003-XS0000000c
+Signature:
+000000: c0 ef 7f 3b c2 f0 22 23 ce 3f eb 51 0d 3d fb 60  ...;.."#.?.Q.=.`
+000010: 45 69 d3 48 60 68 9d 6c e5 0d ed 13 7b 9b f7 39  Ei.H`h.l....{..9
+000020: 6c f9 e1 09 1e d1 69 65 9b 11 dd 0b 09 86 41 21  l.....ie......A!
+000030: 31 c6 b4 6f fc e8 4d 2a f1 00 90 2f b7 8a d8 41  1..o..M*.../...A
+000040: 98 95 81 06 fa 8d 6e 62 e7 31 36 35 85 57 06 47  ......nb.165.W.G
+000050: 9e cd 70 14 18 be 2d 71 7d 9a b1 04 73 ba 0c 6b  ..p...-q}...s..k
+000060: 44 74 03 1b 56 97 28 15 b2 d0 8b 4a 81 a1 f3 2d  Dt..V.(....J...-
+000070: 8a 2f 19 21 b4 57 55 72 89 0a 8c 22 af 1a 77 02  ./.!.WUr..."..w.
+000080: 6f 45 96 4b 32 5d 41 25 fe 1d ed 6f fd 53 15 5f  oE.K2]A%...o.S._
+000090: f5 9b a9 6a d0 25 6f 1d 15 81 33 19 6b 9b 3c 41  ...j.%o...3.k.<A
+0000a0: 1b b9 b2 41 8e 4f d4 1c ca 49 a3 7d f9 5e 99 50  ...A.O...I.}.^.P
+0000b0: e1 c2 c7 6f 6c 98 77 5a 21 2e 56 1a a7 2c 84 70  ...ol.wZ!.V..,.p
+0000c0: 47 7f db 7e 6a de 2e 66 16 84 f1 74 75 b2 8f 2d  G..~j..f...tu..-
+0000d0: 4e 54 83 3f 88 1f 7d 0b ad 41 fc 01 63 be 36 15  NT.?..}..A..c.6.
+0000e0: f4 47 5d 37 c6 79 90 11 e2 fc d4 5c 71 3e aa 25  .G]7.y.....\q>.%
+0000f0: 3a 00 16 08 24 2b 60 56 b8 eb 47 47 9f 40 bf 23  :...$+`V..GG.@.#
+
+Encrypted Titlekey:     52696B754B48332A2A52696B754B4833
+Decrypted Titlekey:     D4016C1ECDDEB55E2A2C6F88E9B3040E
+Ticket ID:              00041FC3A291EA62
+Ticket Version:         0
+Title ID:               00040000001B5100
+Common Key Index:       0
+Content permission map:
+ 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00
+
+
+TMD header:
+Signature type:         RSA 2048 - SHA256
+Issuer:                 Root-CA00000003-CP0000000b
+Version:                1
+CA CRL version:         0
+Signer CRL version:     0
+System version:         0000000000000000
+Title id:               00040000001B5100
+Title type:             00000040
+Group id:               0000
+Save Size:              1016KB (000fe000)
+Access rights:          00000000
+Title version:          0.0.0 (v0)
+Content count:          0002
+Boot content:           0000
+Hash:                   B8A6EA1B0C156622D3F5518614E846523834EF406ED9E01F47A26D5182F2F14D
+
+TMD content info:
+Content index:          0000
+Command count:          0002
+Unknown:                E9205C9F332F113880CC777C60174DECFE8FF645B5736F60EEDD1DC43E7758C6
+
+TMD contents:
+Content id:             00000000
+Content index:          0000
+Content type:           0000
+Content size:           00000000dce74000
+Content hash:           3C1E745CBC8DAD8E8DB0318826C6332A6345CF3BC579B38ACD8FB75ABF5B5612
+
+Content id:             00000001
+Content index:          0001
+Content type:           0000
+Content size:           0000000000203000
+Content hash:           62B09BD0070817714EE20E76C082D58B00428D50FDC2441743A02E46802BC1CC
+
