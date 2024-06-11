@@ -52,7 +52,7 @@ while choice:
                 "you can open cmd in your folder and type makerom-x86_64.exe to see all available options")
             command = "makerom-x86_64 -ciatocci "+romName+".cia"
             print("executing ", command)
-            print("Beggining Conversion to .cci!")
+            print("Beginning Conversion to .cci!")
             os.system(command)
             print("conversion Complete!")
             quit()
@@ -69,7 +69,7 @@ while choice:
             romName = input("Enter rom name(you can exclude the .cia part):")
             command = "makerom-x86_64 -ciatocci "+romName+".cia"
             print("executing ", command)
-            print("Beggining Conversion!")
+            print("Beginning Conversion!")
             os.system(command)
             print("conversion Complete!\nBeggining Decrypting process\n")
             print("This takes some time don't think your screen is frozen :)")
