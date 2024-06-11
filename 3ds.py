@@ -42,7 +42,7 @@ while choice:
                 "you can open cmd in your folder and type makerom-x86_64.exe to see all available options")
             command = "makerom-x86_64 -ccitocia "+romName+".cia"
             print("executing ", command)
-            print("Beggining Conversion!")
+            print("Beginning Conversion!")
             os.system(command)
             print("conversion Complete!")
             quit()
