@@ -42,11 +42,6 @@ python --version
 ### Step 3: Install Dependencies (Optional)
 The GUI version requires no external dependencies - tkinter is built-in!
 
-```powershell
-# Optional: Install the requirements file anyway for future-proofing
-pip install -r requirements.txt
-```
-
 ### Step 4: Ensure Required Tools Are Present
 Make sure these files are in the same directory as the script:
 - `makerom-x86_64.exe`
@@ -61,7 +56,7 @@ Make sure these files are in the same directory as the script:
 python 3ds_converter_gui.py
 ```
 
-Or double-click the file in Windows Explorer.
+Or double-click the file `Launch_GUI.bat`in Windows Explorer.
 
 ### How to Use
 
@@ -72,13 +67,13 @@ Or double-click the file in Windows Explorer.
    - CIA to Decrypted CCI
 
 2. **Enter ROM Name**: Type the ROM filename (with or without extension)
-   - Example: `game_name` or `game_name.cia`
+   - Example: `game_name` or `game_name.cia` or select using the browse rom button
 
 3. **Click "Start Conversion"**: The conversion will begin
    - Watch the log output for progress
    - Status bar shows real-time updates
 
-4. **Check the ROMs folder**: Your converted files appear here
+4. **Check the ROMs folder**: Your converted files appear here or you have an option to select the output folder in the GUI
 
 ### Tips
 
