@@ -3,7 +3,7 @@
 A modern, async-based GUI tool to convert 3DS ROM formats (CIA/CCI) and decrypt them for use with the Citra emulator.
 
 ## Features ✨
-
+![alt text](screenshots\GUI.png)
 ### Improvements Over Original
 - **🚀 Async Operations**: Uses Python's asyncio for concurrent processing - faster conversions
 - **💻 Modern GUI**: Professional graphical interface instead of text-based menu
