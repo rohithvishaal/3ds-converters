@@ -1,3 +1,4 @@
+You might also be interested in [Hotcorners for windows](https://github.com/rohithvishaal/hotcorners-for-windows) (triggers actions you set when your mouse cursor reaches the corners of your screen)
 # 3DS ROM Converter Pro - Modern Edition
 
 A modern, async-based GUI tool to convert 3DS ROM formats (CIA/CCI) and decrypt them for use with the Citra emulator.
