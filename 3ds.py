@@ -73,8 +73,8 @@ def cci_to_cia():
         print(f"Error: '{romName}.cci' not found in '{ROM_FOLDER}'.")
         return
     in_file = get_rom_path(f"{romName}.cci")
-    print("You can open cmd in your folder and type makerom-x86_64.exe to see all available options")
-    command = f"makerom-x86_64 -ccitocia \"{in_file}\""
+    print("You can open cmd in your folder and type makerom.exe to see all available options")
+    command = f"makerom -ccitocia \"{in_file}\""
     print("Executing:", command)
     print("Beginning Conversion!")
     os.system(command)
@@ -88,8 +88,8 @@ def cia_to_cci():
         print(f"Error: '{romName}.cia' not found in '{ROM_FOLDER}'.")
         return
     in_file = get_rom_path(f"{romName}.cia")
-    print("You can open cmd in your folder and type makerom-x86_64.exe to see all available options")
-    command = f"makerom-x86_64 -ciatocci \"{in_file}\""
+    print("You can open cmd in your folder and type makerom.exe to see all available options")
+    command = f"makerom -ciatocci \"{in_file}\""
     print("Executing:", command)
     print("Beginning Conversion to .cci!")
     os.system(command)
@@ -120,7 +120,7 @@ def cia_to_cci_decrypted():
         print(f"Error: '{romName}.cia' not found in '{ROM_FOLDER}'.")
         return
     in_file = get_rom_path(f"{romName}.cia")
-    command = f"makerom-x86_64 -ciatocci \"{in_file}\""
+    command = f"makerom -ciatocci \"{in_file}\""
     print("Executing:", command)
     print("Beginning Conversion!")
     os.system(command)

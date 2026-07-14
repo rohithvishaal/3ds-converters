@@ -148,7 +148,7 @@ class ROMConverter:
             return (False, msg)
         
         in_file = self.get_rom_path(f"{rom_name}.cci")
-        command = f"makerom-x86_64 -ccitocia \"{in_file}\""
+        command = f"makerom -ccitocia \"{in_file}\""
         
         logger.info("Beginning CCI to CIA conversion!")
         return_code, stdout, stderr = await self.run_command(command)
@@ -179,7 +179,7 @@ class ROMConverter:
             return (False, msg)
         
         in_file = self.get_rom_path(f"{rom_name}.cia")
-        command = f"makerom-x86_64 -ciatocci \"{in_file}\""
+        command = f"makerom -ciatocci \"{in_file}\""
         
         logger.info("Beginning CIA to CCI conversion!")
         return_code, stdout, stderr = await self.run_command(command)
@@ -252,7 +252,7 @@ class ROMConverter:
             return (False, msg)
         
         in_file = self.get_rom_path(f"{rom_name}.cia")
-        command = f"makerom-x86_64 -ciatocci \"{in_file}\""
+        command = f"makerom -ciatocci \"{in_file}\""
         
         logger.info("Beginning CIA to CCI conversion!")
         return_code, stdout, stderr = await self.run_command(command)
