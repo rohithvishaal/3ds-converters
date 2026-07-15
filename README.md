@@ -25,7 +25,7 @@ A modern, async-based GUI tool to convert 3DS ROM formats (CIA/CCI) and decrypt 
 - **Python**: 3.9 or higher
 - **Operating System**: Windows (due to batch script dependencies)
 - **External Tools** (must be in the same folder):
-  - `makerom-x86_64.exe` - ROM conversion tool
+  - `makerom.exe` - ROM conversion tool
   - `Batch CIA 3DS Decryptor.bat` - Decryption batch script
   - `decrypt.exe` - (used by the batch script)
 
@@ -45,7 +45,7 @@ The GUI version requires no external dependencies - tkinter is built-in!
 
 ### Step 4: Ensure Required Tools Are Present
 Make sure these files are in the same directory as the script:
-- `makerom-x86_64.exe`
+- `makerom.exe`
 - `Batch CIA 3DS Decryptor.bat`
 - `decrypt.exe`
 
@@ -117,8 +117,8 @@ All operations are logged to:
 
 ## Troubleshooting
 
-### "makerom-x86_64.exe not found"
-- **Solution**: Ensure `makerom-x86_64.exe` is in the same folder as the script
+### "makerom.exe not found"
+- **Solution**: Ensure `makerom.exe` is in the same folder as the script
 
 ### "Batch CIA 3DS Decryptor.bat not found"
 - **Solution**: Ensure the batch file is in the same folder as the script
