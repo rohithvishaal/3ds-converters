@@ -21,6 +21,7 @@ from enum import Enum
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
+import tkinter.font as tkfont
 
 # Configure logging
 logging.basicConfig(
@@ -76,22 +77,28 @@ class ROMConverter:
         """Get full path to ROM file."""
         return self.rom_folder / filename
     
-    async def run_command(self, command: str) -> tuple[int, str, str]:
+    async def run_command(self, args: list, cwd: Optional[Path] = None) -> tuple[int, str, str]:
         """
         Run an external command asynchronously.
-        
+
+        Uses exec (not shell) so paths with spaces/special characters never need manual
+        quoting and no extra cmd.exe/sh process has to be spawned just to parse a string.
+
         Args:
-            command: Command string to execute
-            
+            args: Command and arguments as a list, e.g. [str(makerom_exe), "-ciatocci", str(in_file)]
+            cwd: Working directory to run the command in (controls where output files land)
+
         Returns:
             Tuple of (return_code, stdout, stderr)
         """
-        logger.info(f"Executing: {command}")
+        str_args = [str(a) for a in args]
+        logger.info(f"Executing: {' '.join(str_args)}")
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
+            process = await asyncio.create_subprocess_exec(
+                *str_args,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(cwd) if cwd else None,
             )
             stdout, stderr = await process.communicate()
             return (
@@ -129,8 +136,6 @@ class ROMConverter:
         }
 
         search_dirs = [
-            Path.cwd(),
-            self.script_dir,
             self.rom_folder,
             output_folder,
         ]
@@ -203,7 +208,7 @@ class ROMConverter:
         else:
             patterns = [f"{rom_name}*-decrypted.cia", f"{rom_name}*.cia"]
 
-        search_dirs = [output_folder, self.script_dir, self.rom_folder, Path.cwd()]
+        search_dirs = [output_folder, self.rom_folder]
         for folder in search_dirs:
             if not folder.exists():
                 continue
@@ -213,69 +218,143 @@ class ROMConverter:
                     return matches[0]
         return None
 
-    async def run_batch_decrypt(self, output_folder: Optional[Path] = None, convert_to_cci: bool = False, move_outputs: bool = True) -> tuple[bool, str]:
-        """Run the batch decryptor in the script directory and collect any output files."""
+    def prepare_batch_runtime(self, target_dir: Path) -> Optional[Path]:
+        """
+        Copy the batch decryptor script and its bin/ dependencies into target_dir so it can
+        run directly against ROM files that already live there.
+
+        This is the key perf fix: previously every ROM file in the folder was copied into
+        the script's own directory before each run (and batch mode did this once per file,
+        i.e. up to N times for N ROMs). ROM files can be hundreds of MB to several GB, while
+        bin/ is a handful of small executables, so copying the tool in instead of the ROMs
+        out avoids that I/O entirely.
+        """
+        source_script = self.get_batch_script_path()
+        if source_script is None:
+            logger.error("Batch decryptor script not found")
+            return None
+
+        source_dir = source_script.parent
+        source_bin = source_dir / "bin"
+        target_bin = target_dir / "bin"
+        target_script = target_dir / source_script.name
+
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            if source_bin.exists():
+                if target_bin.exists():
+                    shutil.rmtree(target_bin)
+                shutil.copytree(source_bin, target_bin)
+            shutil.copy2(source_script, target_script)
+        except Exception as e:
+            logger.error(f"Failed to prepare batch runtime in {target_dir}: {e}")
+            return None
+
+        return target_script
+
+    def cleanup_batch_runtime(self, target_dir: Path) -> None:
+        """Remove the copied batch script, its bin/ folder, and its log/ folder from target_dir."""
+        source_script = self.get_batch_script_path()
+        names_to_remove = ["bin", "log"]
+        if source_script is not None:
+            names_to_remove.append(source_script.name)
+
+        for name in names_to_remove:
+            candidate = target_dir / name
+            try:
+                if candidate.is_dir():
+                    shutil.rmtree(candidate)
+                elif candidate.is_file():
+                    candidate.unlink()
+            except Exception as e:
+                logger.warning(f"Could not remove batch runtime item {candidate}: {e}")
+
+    async def run_batch_decrypt(
+        self,
+        output_folder: Optional[Path] = None,
+        convert_to_cci: bool = False,
+        move_outputs: bool = True,
+        rom_name_filter: Optional[str] = None,
+        exclude_paths: Optional[set] = None,
+    ) -> tuple[bool, str]:
+        """
+        Run the batch decryptor directly inside the ROM folder and collect any output files.
+
+        Runs in-place against self.rom_folder rather than copying ROM files elsewhere; only
+        the batch script + bin/ are copied in (and cleaned up again) each run. rom_name_filter
+        and exclude_paths keep this safe when other unrelated ROMs share the same folder: only
+        newly produced "-decrypted" files matching rom_name_filter are treated as output, and
+        the original source file is never mistaken for output.
+        """
         if output_folder is None:
             output_folder = self.output_folder
+        excluded = {p.resolve() for p in (exclude_paths or set())}
 
-        batch_script = self.get_batch_script_path()
+        working_dir = self.rom_folder
+        batch_script = self.prepare_batch_runtime(working_dir)
         if batch_script is None:
-            msg = "Batch decryptor script not found"
-            logger.error(msg)
+            msg = "Batch decryptor script not found or could not be prepared"
             return (False, msg)
 
-        script_dir = batch_script.parent
-        for source in self.rom_folder.glob("*"):
-            if source.is_file() and source.suffix.lower() in {".cia", ".cci", ".3ds"}:
-                try:
-                    shutil.copy2(source, script_dir / source.name)
-                except Exception as e:
-                    logger.warning(f"Could not copy {source.name} to working directory: {e}")
-
         input_data = b"y\n" if convert_to_cci else b"n\n"
-        logger.info("Running batch decryption flow...")
-        process = await asyncio.create_subprocess_shell(
-            f'"{batch_script.name}"',
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(script_dir),
-        )
-        stdout, stderr = await process.communicate(input_data)
-        stdout_text = stdout.decode("utf-8", errors="replace")
-        stderr_text = stderr.decode("utf-8", errors="replace")
+        logger.info("Running batch decryption flow directly in the ROM folder (no ROM copy needed)...")
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "cmd", "/c", str(batch_script),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(working_dir),
+            )
+            stdout, stderr = await process.communicate(input_data)
+            stdout_text = stdout.decode("utf-8", errors="replace")
+            stderr_text = stderr.decode("utf-8", errors="replace")
+        finally:
+            self.cleanup_batch_runtime(working_dir)
 
         if stdout_text:
             logger.info(stdout_text)
         if stderr_text:
             logger.warning(stderr_text)
 
-        output_folder.mkdir(parents=True, exist_ok=True)
-        moved_any = False
-        for candidate in sorted(script_dir.glob("*")):
-            if not candidate.is_file():
+        # Only newly-produced "-decrypted" files count as output; this never picks up the
+        # original source ROM or unrelated ROMs sitting in the same folder.
+        candidates = []
+        for candidate in sorted(working_dir.glob("*")):
+            if not candidate.is_file() or candidate.resolve() in excluded:
                 continue
-            if candidate.name.lower() in {"batch cia 3ds decryptor redux.bat", "batch cia 3ds decryptor.bat"}:
+            if candidate.suffix.lower() not in {".cia", ".cci", ".3ds"}:
                 continue
             name_lower = candidate.name.lower()
-            if name_lower.endswith(".3ds") or "decrypted" in name_lower or candidate.suffix.lower() in {".cia", ".cci"}:
-                try:
-                    if move_outputs:
-                        dest_path = output_folder / candidate.name
-                        if dest_path.exists():
-                            dest_path.unlink()
-                        shutil.move(str(candidate), str(dest_path))
-                        logger.info(f"Moved decrypted output to {dest_path}")
-                    else:
-                        logger.info(f"Preserved decrypted output in working directory: {candidate}")
-                    moved_any = True
-                except Exception as e:
-                    logger.error(f"Error moving decrypted output {candidate.name}: {e}")
+            if "decrypted" not in name_lower:
+                continue
+            if rom_name_filter and rom_name_filter.lower() not in name_lower:
+                continue
+            candidates.append(candidate)
 
-        if moved_any:
-            if move_outputs:
-                return (True, f"Batch decryption completed and outputs were moved to {output_folder}")
-            return (True, f"Batch decryption completed and outputs were preserved in {script_dir}")
+        if not candidates:
+            return (False, "No decrypted output files were produced")
+
+        same_dir = output_folder.resolve() == working_dir.resolve()
+        if not move_outputs or same_dir:
+            logger.info(f"Decrypted output left in place: {working_dir}")
+            return (True, f"Batch decryption completed; outputs are in {working_dir}")
+
+        output_folder.mkdir(parents=True, exist_ok=True)
+        moved = []
+        for candidate in candidates:
+            try:
+                dest_path = output_folder / candidate.name
+                if dest_path.exists():
+                    dest_path.unlink()
+                shutil.move(str(candidate), str(dest_path))
+                moved.append(dest_path)
+            except Exception as e:
+                logger.error(f"Error moving decrypted output {candidate.name}: {e}")
+
+        if moved:
+            logger.info(f"Moved {len(moved)} decrypted output file(s) to {output_folder}")
+            return (True, f"Batch decryption completed and outputs were moved to {output_folder}")
         return (False, "No decrypted output files were produced")
 
     async def decrypt_rom_file(self, rom_name: str, output_folder: Optional[Path] = None, convert_to_cci: bool = False, move_outputs: bool = True) -> tuple[bool, str, Optional[Path]]:
@@ -296,7 +375,13 @@ class ROMConverter:
             return (False, msg, None)
 
         logger.info(f"Preparing batch decryption for {source_file.name}")
-        success, msg = await self.run_batch_decrypt(output_folder, convert_to_cci=convert_to_cci, move_outputs=move_outputs)
+        success, msg = await self.run_batch_decrypt(
+            output_folder,
+            convert_to_cci=convert_to_cci,
+            move_outputs=move_outputs,
+            rom_name_filter=rom_name,
+            exclude_paths={source_file},
+        )
         if not success:
             return (False, msg, None)
 
@@ -304,44 +389,6 @@ class ROMConverter:
         if output_path is None:
             return (False, "Batch decryption completed but no matching output file was found", None)
         return (True, msg, output_path)
-
-    def cleanup_working_dir(self, rom_name: str) -> None:
-        """
-        Remove leftover files from the batch script's working directory for rom_name.
-
-        run_batch_decrypt() copies the source ROM into the batch script's folder before
-        running it, and get_retry_input() calls decrypt_rom_file(..., move_outputs=False)
-        so it can inspect the result without moving anything. That combination leaves the
-        copied original ROM and any intermediate decrypted file sitting in that folder
-        even after the real output has been collected. Call this once the needed output
-        has been safely moved elsewhere.
-        """
-        batch_script = self.get_batch_script_path()
-        if batch_script is None:
-            return
-        script_dir = batch_script.parent
-
-        normalized_rom_name = rom_name.lower().replace("-decrypted", "")
-        name_variants = {v for v in {
-            rom_name.lower(),
-            normalized_rom_name,
-        } if v}
-
-        for candidate in script_dir.glob("*"):
-            if not candidate.is_file():
-                continue
-            name_lower = candidate.name.lower()
-            if name_lower in {"batch cia 3ds decryptor redux.bat", "batch cia 3ds decryptor.bat"}:
-                continue
-            if candidate.suffix.lower() not in {".cia", ".cci", ".3ds"}:
-                continue
-            stem_lower = candidate.stem.lower()
-            if stem_lower in name_variants or any(v in stem_lower for v in name_variants):
-                try:
-                    candidate.unlink()
-                    logger.info(f"Cleaned up leftover working file: {candidate}")
-                except Exception as e:
-                    logger.warning(f"Could not remove leftover file {candidate}: {e}")
 
     async def get_retry_input(self, rom_name: str, output_folder: Path, original_input: Path) -> Path:
         """Try the batch-based decrypt flow and return a decrypted intermediate if available."""
@@ -361,107 +408,79 @@ class ROMConverter:
         logger.info(f"No decrypted retry input found; falling back to original input: {original_input}")
         return original_input
     
-    async def cci_to_cia(self, rom_name: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
-        """Convert CCI to CIA, retrying after decryption if the initial conversion fails."""
+    async def _convert_with_makerom(self, rom_name: str, source_ext: str, makerom_flag: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
+        """
+        Shared conversion logic for both cci_to_cia and cia_to_cci: run makerom, and if it
+        fails on the plain encrypted input, retry using a decrypted intermediate from the
+        batch flow. Extracted once so a fix here (like the .cci-fed-back-into-makerom bug)
+        automatically applies to both directions instead of needing to be fixed twice.
+        """
         if output_folder is None:
             output_folder = self.output_folder
-            
+
+        conv_name = "CIA to CCI" if makerom_flag == "-ciatocci" else "CCI to CIA"
+        target_ext = ".cci" if makerom_flag == "-ciatocci" else ".cia"
+
         original_ext = self.find_rom_ext(rom_name)
-        if original_ext != ".cci":
-            msg = f"Error: '{rom_name}.cci' not found"
+        if original_ext != source_ext:
+            msg = f"Error: '{rom_name}{source_ext}' not found"
             logger.error(msg)
             return (False, msg)
-        
-        in_file = self.get_rom_path(f"{rom_name}.cci")
-        command = f'"{self.makerom_exe}" -ccitocia "{in_file}"'
-        
-        logger.info("Beginning CCI to CIA conversion!")
-        return_code, stdout, stderr = await self.run_command(command)
-        
+
+        in_file = self.get_rom_path(f"{rom_name}{source_ext}")
+        logger.info(f"Beginning {conv_name} conversion!")
+        return_code, stdout, stderr = await self.run_command(
+            [self.makerom_exe, makerom_flag, in_file], cwd=in_file.parent
+        )
+
         if return_code != 0:
-            logger.warning("Initial CCI to CIA conversion failed; attempting decrypt-first retry...")
-            retry_input = await self.get_retry_input(rom_name, output_folder, in_file)
-            if retry_input != in_file:
-                logger.info(f"Using decrypted input for retry: {retry_input}")
-            retry_command = f'"{self.makerom_exe}" -ccitocia "{retry_input}"'
-            return_code, stdout, stderr = await self.run_command(retry_command)
-            if return_code != 0:
-                msg = f"Conversion failed after decrypt retry: {stderr or 'No detailed error output was produced.'}"
-                logger.error(msg)
-                return (False, msg)
-        
-        success = await self.move_converted_file(rom_name, original_ext, output_folder)
-        if success:
-            self.cleanup_working_dir(rom_name)
-            msg = "CCI to CIA conversion completed successfully!"
-        else:
-            msg = "Conversion completed but file move failed"
-        
-        logger.info(msg)
-        return (success, msg)
-    
-    async def cia_to_cci(self, rom_name: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
-        """Convert CIA to CCI, retrying after decryption if the initial conversion fails."""
-        if output_folder is None:
-            output_folder = self.output_folder
-            
-        original_ext = self.find_rom_ext(rom_name)
-        if original_ext != ".cia":
-            msg = f"Error: '{rom_name}.cia' not found"
-            logger.error(msg)
-            return (False, msg)
-        
-        in_file = self.get_rom_path(f"{rom_name}.cia")
-        command = f'"{self.makerom_exe}" -ciatocci "{in_file}"'
-        
-        logger.info("Beginning CIA to CCI conversion!")
-        return_code, stdout, stderr = await self.run_command(command)
-        
-        if return_code != 0:
-            logger.warning("Initial CIA to CCI conversion failed; attempting decrypt-first retry...")
+            logger.warning(f"Initial {conv_name} conversion failed; attempting decrypt-first retry...")
             retry_input = await self.get_retry_input(rom_name, output_folder, in_file)
             if retry_input != in_file:
                 logger.info(f"Using decrypted input for retry: {retry_input}")
 
-            if retry_input.suffix.lower() == ".cci":
-                # get_retry_input's decrypt-first attempt (convert_to_cci=True) asks the
-                # batch script to decrypt AND pack the CCI itself, so retry_input here is
-                # already a finished .cci -- not a decrypted .cia. Feeding a .cci back into
-                # "makerom -ciatocci" is invalid and is what produced the makerom error.
-                # There's nothing left for makerom to do, so just use this file directly.
-                logger.info("Decrypt retry already produced a finished CCI; using it directly instead of calling makerom again.")
-                dest_path = output_folder / f"{rom_name}.cci"
+            if retry_input.suffix.lower() == target_ext:
+                # The decrypt-first batch flow (convert_to_cci=True) asks the batch script
+                # to decrypt AND pack the target format itself, so retry_input here is
+                # already the finished file -- not an intermediate for makerom to consume.
+                # Feeding it back into makerom would be invalid (that was the original bug);
+                # there's nothing left for makerom to do, so just use it directly.
+                logger.info(f"Decrypt retry already produced a finished {target_ext} file; using it directly instead of calling makerom again.")
+                dest_path = output_folder / f"{rom_name}{target_ext}"
                 try:
                     output_folder.mkdir(parents=True, exist_ok=True)
                     if dest_path.exists():
                         dest_path.unlink()
                     if retry_input.resolve() != dest_path.resolve():
                         shutil.move(str(retry_input), str(dest_path))
-                    self.cleanup_working_dir(rom_name)
-                    msg = "CIA to CCI conversion completed successfully (via decrypt-first flow)!"
+                    msg = f"{conv_name} conversion completed successfully (via decrypt-first flow)!"
                     logger.info(msg)
                     return (True, msg)
                 except Exception as e:
-                    msg = f"Decrypted CCI produced but failed to move into place: {e}"
+                    msg = f"Decrypted {target_ext} file produced but failed to move into place: {e}"
                     logger.error(msg)
                     return (False, msg)
 
-            retry_command = f'"{self.makerom_exe}" -ciatocci "{retry_input}"'
-            return_code, stdout, stderr = await self.run_command(retry_command)
+            return_code, stdout, stderr = await self.run_command(
+                [self.makerom_exe, makerom_flag, retry_input], cwd=retry_input.parent
+            )
             if return_code != 0:
                 msg = f"Conversion failed after decrypt retry: {stderr or 'No detailed error output was produced.'}"
                 logger.error(msg)
                 return (False, msg)
-        
+
         success = await self.move_converted_file(rom_name, original_ext, output_folder)
-        if success:
-            self.cleanup_working_dir(rom_name)
-            msg = "CIA to CCI conversion completed successfully!"
-        else:
-            msg = "Conversion completed but file move failed"
-        
+        msg = f"{conv_name} conversion completed successfully!" if success else "Conversion completed but file move failed"
         logger.info(msg)
         return (success, msg)
+
+    async def cci_to_cia(self, rom_name: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
+        """Convert CCI to CIA, retrying after decryption if the initial conversion fails."""
+        return await self._convert_with_makerom(rom_name, ".cci", "-ccitocia", output_folder)
+
+    async def cia_to_cci(self, rom_name: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
+        """Convert CIA to CCI, retrying after decryption if the initial conversion fails."""
+        return await self._convert_with_makerom(rom_name, ".cia", "-ciatocci", output_folder)
     
     async def cci_decrypt(self) -> tuple[bool, str]:
         """Decrypt all CCI files using the same batch flow as the .bat script."""
@@ -561,6 +580,17 @@ class ConverterGUI:
         self.selected_rom_file: Optional[Path] = None  # Store full path to browsed ROM
         self.setup_ui()
         self.running = False
+
+    def _post(self, fn, *args, **kwargs) -> None:
+        """
+        Schedule a Tkinter-mutating callable to run on the main thread.
+
+        Conversions run in a background thread (see run_conversion etc.), but Tkinter is
+        not thread-safe. Every widget update, status/messagebox call, and log append that
+        happens during a conversion must go through this instead of being called directly,
+        or the UI can intermittently freeze/corrupt.
+        """
+        self.root.after(0, lambda: fn(*args, **kwargs))
         
     def setup_ui(self) -> None:
         """Setup the GUI interface."""
@@ -572,6 +602,18 @@ class ConverterGUI:
         # Style configuration
         style = ttk.Style()
         style.theme_use('clam')
+
+        # Derive fonts from the platform's own default rather than hardcoding "Arial",
+        # which isn't guaranteed to be installed on Linux/macOS.
+        default_font = tkfont.nametofont("TkDefaultFont")
+        self.title_font = default_font.copy()
+        self.title_font.configure(size=16, weight="bold")
+        self.label_font = default_font.copy()
+        self.label_font.configure(size=10)
+        self.bold_label_font = default_font.copy()
+        self.bold_label_font.configure(size=9, weight="bold")
+        self.small_font = default_font.copy()
+        self.small_font.configure(size=9)
         
         # Main container with proper weight distribution
         main_frame = ttk.Frame(self.root, padding="10")
@@ -593,7 +635,7 @@ class ConverterGUI:
         
         # Title
         title_label = ttk.Label(main_frame, text="3DS ROM Converter Pro", 
-                               font=("Arial", 16, "bold"))
+                               font=self.title_font)
         title_label.grid(row=0, column=0, columnspan=3, pady=10)
         
         # === Input Mode Selection ===
@@ -650,10 +692,10 @@ class ConverterGUI:
         stats_frame.columnconfigure(0, weight=1)
         
         # File counts
-        self.cci_count_label = ttk.Label(stats_frame, text="CCI files: 0", font=("Arial", 10))
+        self.cci_count_label = ttk.Label(stats_frame, text="CCI files: 0", font=self.label_font)
         self.cci_count_label.grid(row=0, column=0, sticky=tk.W, padx=5, pady=3)
         
-        self.cia_count_label = ttk.Label(stats_frame, text="CIA files: 0", font=("Arial", 10))
+        self.cia_count_label = ttk.Label(stats_frame, text="CIA files: 0", font=self.label_font)
         self.cia_count_label.grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
         
         # Conversion options frame
@@ -661,7 +703,7 @@ class ConverterGUI:
         options_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         options_frame.columnconfigure(0, weight=1)
         
-        ttk.Label(options_frame, text="Convert:", font=("Arial", 9, "bold")).pack(anchor=tk.W, padx=5)
+        ttk.Label(options_frame, text="Convert:", font=self.bold_label_font).pack(anchor=tk.W, padx=5)
         
         # CCI → CIA option
         self.convert_cci_to_cia_frame = ttk.Frame(options_frame)
@@ -750,7 +792,7 @@ class ConverterGUI:
         # === Status bar ===
         self.status_var = tk.StringVar(value="Ready")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
-                              relief=tk.SUNKEN, font=("Arial", 9))
+                              relief=tk.SUNKEN, font=self.small_font)
         status_bar.grid(row=7, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
         
         # === Progress bar ===
@@ -764,19 +806,34 @@ class ConverterGUI:
         self.setup_log_handler()
     
     def setup_log_handler(self) -> None:
-        """Setup logging to display in GUI."""
+        """Setup logging to display in the GUI, safely from any thread."""
+        MAX_LOG_LINES = 2000
+
+        self.log_text.tag_configure("ERROR", foreground="#c0392b")
+        self.log_text.tag_configure("WARNING", foreground="#b9770e")
+        self.log_text.tag_configure("INFO", foreground="#2c3e50")
+
+        root = self.root
+        text_widget = self.log_text
+
         class GUIHandler(logging.Handler):
-            def __init__(self, text_widget):
-                super().__init__()
-                self.text_widget = text_widget
-            
             def emit(self, record):
                 msg = self.format(record)
-                self.text_widget.insert(tk.END, msg + "\n")
-                self.text_widget.see(tk.END)
-                self.text_widget.update()
-        
-        gui_handler = GUIHandler(self.log_text)
+                tag = record.levelname if record.levelname in {"ERROR", "WARNING"} else "INFO"
+
+                def append():
+                    text_widget.insert(tk.END, msg + "\n", tag)
+                    line_count = int(text_widget.index('end-1c').split('.')[0])
+                    if line_count > MAX_LOG_LINES:
+                        text_widget.delete("1.0", f"{line_count - MAX_LOG_LINES}.0")
+                    text_widget.see(tk.END)
+
+                # Logging can happen from the background conversion thread; Tkinter widgets
+                # may only be touched from the main thread, so schedule the update instead
+                # of mutating text_widget directly here.
+                root.after(0, append)
+
+        gui_handler = GUIHandler()
         gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         logger.addHandler(gui_handler)
     
@@ -989,8 +1046,9 @@ class ConverterGUI:
     def run_conversion(self, rom_name: str, conversion_type: ConversionType, rom_folder: Path) -> None:
         """Run conversion in background thread."""
         self.running = True
-        self.convert_btn.config(state=tk.DISABLED)
-        self.progress.start()
+        self._post(self.convert_btn.config, state=tk.DISABLED)
+        self._post(self.progress.config, mode='indeterminate')
+        self._post(self.progress.start)
         
         try:
             output_folder = Path(self.output_folder_var.get())
@@ -1012,27 +1070,28 @@ class ConverterGUI:
             
             self.converter.rom_folder = original_rom_folder
             
-            self.status_var.set(f"{'✓ Success' if success else '✗ Failed'}: {message}")
+            self._post(self.status_var.set, f"{'✓ Success' if success else '✗ Failed'}: {message}")
             
             if success:
-                messagebox.showinfo("Success", message)
+                self._post(messagebox.showinfo, "Success", message)
             else:
-                messagebox.showerror("Error", message)
+                self._post(messagebox.showerror, "Error", message)
                 
         except Exception as e:
-            self.status_var.set(f"Error: {str(e)}")
-            messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
+            self._post(self.status_var.set, f"Error: {str(e)}")
+            self._post(messagebox.showerror, "Error", f"An error occurred:\n{str(e)}")
         finally:
             self.running = False
-            self.convert_btn.config(state=tk.NORMAL)
-            self.progress.stop()
+            self._post(self.convert_btn.config, state=tk.NORMAL)
+            self._post(self.progress.stop)
     
     def run_folder_conversion(self, source_folder: Path, rom_names: list[str], 
                             conversion_type: ConversionType) -> None:
         """Run batch folder conversion in background thread."""
         self.running = True
-        self.convert_btn.config(state=tk.DISABLED)
-        self.progress.start()
+        self._post(self.convert_btn.config, state=tk.DISABLED)
+        total = len(rom_names)
+        self._post(self.progress.config, mode='determinate', maximum=max(total, 1), value=0)
         
         try:
             output_folder = Path(self.output_folder_var.get())
@@ -1050,6 +1109,7 @@ class ConverterGUI:
             successful = 0
             for i, rom_name in enumerate(rom_names, 1):
                 logger.info(f"Processing {i}/{len(rom_names)}: {rom_name}")
+                self._post(self.status_var.set, f"Converting {i}/{total}: {rom_name}")
                 
                 config = ConversionConfig(
                     rom_name=rom_name,
@@ -1061,6 +1121,7 @@ class ConverterGUI:
                 success, message = loop.run_until_complete(self.converter.convert(config))
                 if success:
                     successful += 1
+                self._post(self.progress.config, value=i)
             
             loop.close()
             
@@ -1068,22 +1129,23 @@ class ConverterGUI:
             self.converter.rom_folder = original_rom_folder
             
             message = f"Batch conversion complete: {successful}/{len(rom_names)} successful"
-            self.status_var.set(f"✓ {message}")
-            messagebox.showinfo("Success", message)
+            self._post(self.status_var.set, f"✓ {message}")
+            self._post(messagebox.showinfo, "Success", message)
             
         except Exception as e:
-            self.status_var.set(f"Error: {str(e)}")
-            messagebox.showerror("Error", f"An error occurred during batch conversion:\n{str(e)}")
+            self._post(self.status_var.set, f"Error: {str(e)}")
+            self._post(messagebox.showerror, "Error", f"An error occurred during batch conversion:\n{str(e)}")
         finally:
             self.running = False
-            self.convert_btn.config(state=tk.NORMAL)
-            self.progress.stop()
+            self._post(self.convert_btn.config, state=tk.NORMAL)
+            self._post(self.progress.config, mode='indeterminate', value=0)
     
     def run_multi_conversion(self, source_folder: Path, conversions: list) -> None:
         """Run multiple conversion types in batch."""
         self.running = True
-        self.convert_btn.config(state=tk.DISABLED)
-        self.progress.start()
+        self._post(self.convert_btn.config, state=tk.DISABLED)
+        overall_total = sum(len(rom_names) for _, rom_names, _ in conversions)
+        self._post(self.progress.config, mode='determinate', maximum=max(overall_total, 1), value=0)
         
         try:
             output_folder = Path(self.output_folder_var.get())
@@ -1097,6 +1159,7 @@ class ConverterGUI:
             
             total_successful = 0
             total_count = 0
+            overall_progress = 0
             
             # Process each conversion type
             for conversion_type, rom_names, file_count in conversions:
@@ -1106,6 +1169,7 @@ class ConverterGUI:
                 successful = 0
                 for i, rom_name in enumerate(rom_names, 1):
                     logger.info(f"  {i}/{len(rom_names)}: {rom_name}")
+                    self._post(self.status_var.set, f"{conversion_type.value}: {i}/{len(rom_names)} - {rom_name}")
                     
                     config = ConversionConfig(
                         rom_name=rom_name,
@@ -1117,6 +1181,8 @@ class ConverterGUI:
                     success, message = loop.run_until_complete(self.converter.convert(config))
                     if success:
                         successful += 1
+                    overall_progress += 1
+                    self._post(self.progress.config, value=overall_progress)
                 
                 logger.info(f"Completed {conversion_type.value}: {successful}/{len(rom_names)} successful\n")
                 total_successful += successful
@@ -1128,16 +1194,16 @@ class ConverterGUI:
             self.converter.rom_folder = original_rom_folder
             
             message = f"All conversions complete: {total_successful}/{total_count} files processed successfully"
-            self.status_var.set(f"✓ {message}")
-            messagebox.showinfo("Success", message)
+            self._post(self.status_var.set, f"✓ {message}")
+            self._post(messagebox.showinfo, "Success", message)
             
         except Exception as e:
-            self.status_var.set(f"Error: {str(e)}")
-            messagebox.showerror("Error", f"An error occurred during batch conversion:\n{str(e)}")
+            self._post(self.status_var.set, f"Error: {str(e)}")
+            self._post(messagebox.showerror, "Error", f"An error occurred during batch conversion:\n{str(e)}")
         finally:
             self.running = False
-            self.convert_btn.config(state=tk.NORMAL)
-            self.progress.stop()
+            self._post(self.convert_btn.config, state=tk.NORMAL)
+            self._post(self.progress.config, mode='indeterminate', value=0)
     
     def on_clear_clicked(self) -> None:
         """Clear input fields."""
