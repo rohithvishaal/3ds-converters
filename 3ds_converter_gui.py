@@ -248,7 +248,7 @@ class ROMConverter:
         return (True, msg, output_path)
     
     async def cci_to_cia(self, rom_name: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
-        """Convert CCI to CIA."""
+        """Convert CCI to CIA, retrying after decryption if the initial conversion fails."""
         if output_folder is None:
             output_folder = self.output_folder
             
@@ -265,9 +265,17 @@ class ROMConverter:
         return_code, stdout, stderr = await self.run_command(command)
         
         if return_code != 0:
-            msg = f"Conversion failed: {stderr}"
-            logger.error(msg)
-            return (False, msg)
+            logger.warning("Initial CCI to CIA conversion failed; attempting decrypt-first retry...")
+            decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(rom_name, output_folder, convert_to_cci=False)
+            retry_input = decrypted_path if decrypt_success and decrypted_path is not None and decrypted_path.exists() else in_file
+            if retry_input != in_file:
+                logger.info(f"Using decrypted input for retry: {retry_input}")
+            retry_command = f"makerom -ccitocia \"{retry_input}\""
+            return_code, stdout, stderr = await self.run_command(retry_command)
+            if return_code != 0:
+                msg = f"Conversion failed after decrypt retry: {stderr or decrypt_msg}"
+                logger.error(msg)
+                return (False, msg)
         
         success = await self.move_converted_file(rom_name, original_ext, output_folder)
         if success:
@@ -279,7 +287,7 @@ class ROMConverter:
         return (success, msg)
     
     async def cia_to_cci(self, rom_name: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
-        """Convert CIA to CCI after decrypting the input the same way the .bat script does."""
+        """Convert CIA to CCI, retrying after decryption if the initial conversion fails."""
         if output_folder is None:
             output_folder = self.output_folder
             
@@ -289,23 +297,24 @@ class ROMConverter:
             logger.error(msg)
             return (False, msg)
         
-        decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(rom_name, output_folder, convert_to_cci=False)
-        if decrypt_success and decrypted_path is not None and decrypted_path.exists():
-            in_file = decrypted_path
-            logger.info(f"Using decrypted CIA input: {in_file}")
-        else:
-            logger.warning(f"Falling back to original CIA file: {decrypt_msg}")
-            in_file = self.get_rom_path(f"{rom_name}.cia")
-
+        in_file = self.get_rom_path(f"{rom_name}.cia")
         command = f"makerom -ciatocci \"{in_file}\""
         
         logger.info("Beginning CIA to CCI conversion!")
         return_code, stdout, stderr = await self.run_command(command)
         
         if return_code != 0:
-            msg = f"Conversion failed: {stderr}"
-            logger.error(msg)
-            return (False, msg)
+            logger.warning("Initial CIA to CCI conversion failed; attempting decrypt-first retry...")
+            decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(rom_name, output_folder, convert_to_cci=False)
+            retry_input = decrypted_path if decrypt_success and decrypted_path is not None and decrypted_path.exists() else in_file
+            if retry_input != in_file:
+                logger.info(f"Using decrypted input for retry: {retry_input}")
+            retry_command = f"makerom -ciatocci \"{retry_input}\""
+            return_code, stdout, stderr = await self.run_command(retry_command)
+            if return_code != 0:
+                msg = f"Conversion failed after decrypt retry: {stderr or decrypt_msg}"
+                logger.error(msg)
+                return (False, msg)
         
         success = await self.move_converted_file(rom_name, original_ext, output_folder)
         if success:

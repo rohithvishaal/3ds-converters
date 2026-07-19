@@ -1,146 +1,156 @@
-You might also be interested in [Hotcorners for windows](https://github.com/rohithvishaal/hotcorners-for-windows) (triggers actions you set when your mouse cursor reaches the corners of your screen)
+﻿You might also be interested in [Hotcorners for windows](https://github.com/rohithvishaal/hotcorners-for-windows) (triggers actions you set when your mouse cursor reaches the corners of your screen)
+
 # 3DS ROM Converter Pro - Modern Edition
 
-A modern, async-based GUI tool to convert 3DS ROM formats (CIA/CCI) and decrypt them for use with the Citra emulator.
+A modern GUI-based tool for converting 3DS ROM files between CIA and CCI formats and for decrypting them for use with Citra.
 
-## Features ✨
 ![UI](screenshots/GUI.png)
-### Improvements Over Original
-- **🚀 Async Operations**: Uses Python's asyncio for concurrent processing - faster conversions
-- **💻 Modern GUI**: Professional graphical interface instead of text-based menu
-- **📊 Real-time Logging**: See what's happening in real-time in the GUI
-- **🔧 Better Error Handling**: Detailed error messages and recovery
-- **⚙️ Object-Oriented Code**: Clean, maintainable architecture
-- **📝 Type Hints**: Full type annotations for better IDE support
-- **🎯 Non-Blocking Operations**: UI stays responsive during conversions
 
-### Supported Operations
-1. **CCI to CIA**: Convert CCI files to CIA format
-2. **CIA to CCI**: Convert CIA files to CCI format
-3. **CCI Decrypt**: Decrypt all CCI files in batch
-4. **CIA to Decrypted CCI**: One-command conversion and decryption
+## What this tool does
+
+The current GUI workflow is implemented in [3ds_converter_gui.py](3ds_converter_gui.py). It provides a desktop interface for:
+
+- CCI to CIA conversion
+- CIA to CCI conversion
+- CCI decryption
+- CIA to decrypted CCI conversion
+
+For the CCI-to-CIA and CIA-to-CCI flows, the script will first try the normal conversion and, if that fails, it will attempt a decrypt-first retry before trying again.
+
+## Features
+
+- Modern Tkinter-based GUI window
+- Single ROM mode or full-folder batch mode
+- Output folder selection
+- Real-time log window
+- Status bar and progress indicator
+- Automatic detection of available CCI and CIA files in a selected folder
+- Batch processing for multiple files and conversion types
 
 ## Requirements
 
-- **Python**: 3.9 or higher
-- **Operating System**: Windows (due to batch script dependencies)
-- **External Tools** (must be in the same folder):
-  - `makerom.exe` - ROM conversion tool
-  - `Batch CIA 3DS Decryptor.bat` - Decryption batch script
-  - `decrypt.exe` - (used by the batch script)
+- Python 3.9 or higher
+- Windows operating system
+- The helper files must be available in the project folder or the bin folder:
+  - [bin/makerom.exe](bin/makerom.exe)
+  - [bin/ctrtool.exe](bin/ctrtool.exe)
+  - [bin/decrypt.exe](bin/decrypt.exe)
+  - [bin/seeddb.bin](bin/seeddb.bin)
+  - [Batch CIA 3DS Decryptor Redux.bat](Batch%20CIA%203DS%20Decryptor%20Redux.bat)
 
 ## Installation
 
-### Step 1: Install Python
-Download and install Python 3.10+ from [python.org](https://python.org)
-- ✅ Make sure to check "Add Python to PATH" during installation
+### 1. Install Python
+Download and install Python from python.org and make sure Python is added to PATH.
 
-### Step 2: Verify Python Installation
+### 2. Verify Python is available
+Run this in PowerShell:
+
 ```powershell
 python --version
 ```
 
-### Step 3: Install Dependencies (Optional)
-The GUI version requires no external dependencies - tkinter is built-in!
+### 3. Place the required files in the project folder
+The GUI expects the batch script and tools to be available so it can launch them when needed.
 
-### Step 4: Ensure Required Tools Are Present
-Make sure these files are in the same directory as the script:
-- `makerom.exe`
-- `Batch CIA 3DS Decryptor.bat`
-- `decrypt.exe`
+## Running the GUI
 
-## Usage
-
-### Running the GUI Version
+From the project folder, run:
 
 ```powershell
 python 3ds_converter_gui.py
 ```
 
-Or double-click the file `Launch_GUI.bat`in Windows Explorer.
+You can also launch it with:
 
-### How to Use
-
-1. **Select Conversion Type**: Choose from the dropdown:
-   - CCI to CIA
-   - CIA to CCI
-   - CCI Decrypt
-   - CIA to Decrypted CCI
-
-2. **Enter ROM Name**: Type the ROM filename (with or without extension)
-   - Example: `game_name` or `game_name.cia` or select using the browse rom button
-
-3. **Click "Start Conversion"**: The conversion will begin
-   - Watch the log output for progress
-   - Status bar shows real-time updates
-
-4. **Check the ROMs folder**: Your converted files appear here or you have an option to select the output folder in the GUI
-
-### Tips
-
-- **File Names**: Avoid spaces in filenames for best compatibility
-- **CCI Decrypt**: You can decrypt multiple CCI files at once - just place them all in the ROMs folder
-- **Check Encryption**: If unsure whether a ROM is encrypted, try loading it in Citra first
-- **Browse Folder**: Click "Browse ROM Folder" to change where ROMs are stored
-- **Log Details**: Check the log window for detailed error messages if something goes wrong
-
-## File Structure
-
-```
-3ds-converters/
-├── 3ds_converter_gui.py          # Main GUI application (NEW)
-├── 3ds.py                         # Original CLI version (legacy)
-├── Batch CIA 3DS Decryptor.bat    # Required batch script
-├── 3DS_Converter.bat              # Legacy batch converter
-├── makerom-x86_64.exe             # Required tool
-├── decrypt.exe                    # Required tool
-├── requirements.txt               # Python dependencies
-└── ROMs/                          # Output folder (auto-created)
-    ├── converted_game.cia
-    ├── decrypted_game.3ds
-    └── ...
-```
-
-## Advanced Usage
-
-### Using the CLI Version
-If you prefer the command-line interface:
 ```powershell
-python 3ds.py
+Launch_GUI.bat
 ```
 
-### Logging
+## Using the GUI
 
-All operations are logged to:
-- **GUI**: Displayed in real-time in the log window
-- **File**: Logs are sent to Python's logging system
+### Input selection
+Choose one of two modes:
+
+- Single ROM File: convert one selected ROM file
+- Entire Folder: process all compatible ROMs in a chosen folder
+
+### Single ROM mode
+1. Click Browse ROM File and select a .cia or .cci ROM.
+2. Enter or confirm the ROM name.
+3. Choose a conversion type from the dropdown.
+4. Choose an output folder.
+5. Click Start Conversion.
+
+### Folder batch mode
+1. Click Browse Folder and select a directory containing ROM files.
+2. The GUI will show how many .cci and .cia files it found.
+3. Enable one or more conversion options:
+   - CCI → CIA
+   - CIA → CCI
+   - CCI Decrypt
+   - CIA → Decrypted CCI
+4. Choose an output folder.
+5. Click Start Conversion.
+
+### Output behavior
+By default, converted files are written to the ROMs folder. You can choose another output location in the GUI.
+
+## File layout
+
+```text
+3ds-converters/
+├── 3ds_converter_gui.py
+├── 3ds.py
+├── Batch CIA 3DS Decryptor Redux.bat
+├── Launch_GUI.bat
+├── bin/
+│   ├── makerom.exe
+│   ├── ctrtool.exe
+│   ├── decrypt.exe
+│   └── seeddb.bin
+├── ROMs/
+└── screenshots/
+```
+
+## Fallback option if the GUI fails
+
+If the GUI script does not complete successfully, you can fall back to the batch script directly.
+
+1. Place the ROM files in the same folder as [Batch CIA 3DS Decryptor Redux.bat](Batch%20CIA%203DS%20Decryptor%20Redux.bat).
+2. Double-click the batch file or run it from PowerShell:
+
+```powershell
+./Batch CIA 3DS Decryptor Redux.bat
+```
+
+3. Follow the prompts in the console window.
+
+This is useful when you want a simpler, script-driven approach for decryption and conversion.
 
 ## Troubleshooting
 
-### "makerom.exe not found"
-- **Solution**: Ensure `makerom.exe` is in the same folder as the script
+### Python is not recognized
+Install Python and make sure it is added to PATH.
 
-### "Batch CIA 3DS Decryptor.bat not found"
-- **Solution**: Ensure the batch file is in the same folder as the script
+### makerom.exe or ctrtool.exe not found
+Make sure the files exist in the bin folder and that the batch script can access them.
 
-### Conversion seems frozen
-- **Note**: This is normal - conversions can take several minutes. Watch the log for progress.
-- The GUI remains responsive even during conversion
+### ROM not found
+Check that the ROM file is present in the selected source folder or that the correct file extension is being used (.cia or .cci).
 
-### ROM not found error
-- **Check**: Ensure the ROM file is in the `ROMs` folder
-- **Check**: File extension is exactly `.cia` or `.cci`
-- **Tip**: Try running "Browse ROM Folder" to verify the location
+### Conversion seems slow
+Some conversions can take several minutes. The GUI remains responsive while work is running.
 
-### "Python is not recognized"
-- **Solution**: Python wasn't added to PATH during installation
-- **Workaround**: Right-click the Python file → Open with → Python
+### The batch script is easier to use in some cases
+If the GUI fails repeatedly, try the batch script fallback described above and keep the ROMs in the same folder as the batch script.
 
 ## Credits
 
-**Original Scripts & Tools**:
-- **54634564** - decrypt.exe
-- **profi200** - makerom.exe, ctrtool.exe
-- **matif** - Batch CIA 3DS Decryptor.bat
-- **@rohithvishaal** - Original automation script
+Original credits for the underlying tools and workflow:
 
+- 54634564 - decrypt.exe
+- profi200 - makerom.exe and ctrtool.exe
+- matif - Batch CIA 3DS Decryptor batch flow
+- @xxmichibxx - Batch CIA 3DS Decryptor Redux
+- @rohithvishaal - original automation script
