@@ -54,6 +54,8 @@ class ROMConverter:
     def __init__(self, rom_folder: str = "ROMs"):
         self.rom_folder = Path(rom_folder)
         self.output_folder = self.rom_folder  # Default to rom_folder
+        self.script_dir = Path(__file__).resolve().parent
+        self.makerom_exe = self.script_dir / "bin" / "makerom.exe"
         self.ensure_folders()
         
     def ensure_folders(self) -> None:
@@ -118,20 +120,67 @@ class ROMConverter:
             
         target_ext = ".cia" if original_ext == ".cci" else ".cci"
         output_file = f"{rom_name}{target_ext}"
-        
-        # Search in current dir and in ROM_FOLDER
-        for folder in [".", str(self.rom_folder)]:
-            candidate = Path(folder) / output_file
+        normalized_rom_name = rom_name.lower().replace("-decrypted", "")
+        name_variants = {
+            rom_name,
+            rom_name.replace("-decrypted", ""),
+            rom_name.replace(".cia", "").replace(".cci", ""),
+            rom_name.replace("-decrypted", "").replace(".cia", "").replace(".cci", ""),
+        }
+
+        search_dirs = [
+            Path.cwd(),
+            self.script_dir,
+            self.rom_folder,
+            output_folder,
+        ]
+
+        for folder in search_dirs:
+            candidate = folder / output_file
             if candidate.exists():
                 try:
                     dest_path = output_folder / output_file
                     output_folder.mkdir(parents=True, exist_ok=True)
+                    if candidate.resolve() == dest_path.resolve():
+                        logger.info(f"Converted file already present at destination: {dest_path}")
+                        return True
+                    if dest_path.exists():
+                        logger.info(f"Removing existing destination before move: {dest_path}")
+                        dest_path.unlink()
                     shutil.move(str(candidate), str(dest_path))
                     logger.info(f"Moved {output_file} to {output_folder} folder.")
                     return True
                 except Exception as e:
                     logger.error(f"Error moving file: {e}")
                     return False
+
+        candidates = []
+        for folder in search_dirs:
+            if not folder.exists():
+                continue
+            for match in folder.glob(f"*{target_ext}"):
+                if not match.is_file():
+                    continue
+                match_name = match.stem.lower()
+                if any(match_name == variant.lower() for variant in name_variants):
+                    candidates.append(match)
+                elif normalized_rom_name and normalized_rom_name in match_name:
+                    candidates.append(match)
+
+        if candidates:
+            candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            chosen = candidates[0]
+            try:
+                dest_path = output_folder / chosen.name
+                output_folder.mkdir(parents=True, exist_ok=True)
+                if dest_path.exists():
+                    dest_path.unlink()
+                shutil.move(str(chosen), str(dest_path))
+                logger.info(f"Moved converted file {chosen.name} to {output_folder}.")
+                return True
+            except Exception as e:
+                logger.error(f"Error moving file: {e}")
+                return False
         
         logger.warning(f"{output_file} not found to move to {output_folder}.")
         return False
@@ -154,13 +203,17 @@ class ROMConverter:
         else:
             patterns = [f"{rom_name}*-decrypted.cia", f"{rom_name}*.cia"]
 
-        for pattern in patterns:
-            matches = sorted(output_folder.glob(pattern))
-            if matches:
-                return matches[0]
+        search_dirs = [output_folder, self.script_dir, self.rom_folder, Path.cwd()]
+        for folder in search_dirs:
+            if not folder.exists():
+                continue
+            for pattern in patterns:
+                matches = sorted(folder.glob(pattern))
+                if matches:
+                    return matches[0]
         return None
 
-    async def run_batch_decrypt(self, output_folder: Optional[Path] = None, convert_to_cci: bool = False) -> tuple[bool, str]:
+    async def run_batch_decrypt(self, output_folder: Optional[Path] = None, convert_to_cci: bool = False, move_outputs: bool = True) -> tuple[bool, str]:
         """Run the batch decryptor in the script directory and collect any output files."""
         if output_folder is None:
             output_folder = self.output_folder
@@ -207,20 +260,25 @@ class ROMConverter:
             name_lower = candidate.name.lower()
             if name_lower.endswith(".3ds") or "decrypted" in name_lower or candidate.suffix.lower() in {".cia", ".cci"}:
                 try:
-                    dest_path = output_folder / candidate.name
-                    if dest_path.exists():
-                        dest_path.unlink()
-                    shutil.move(str(candidate), str(dest_path))
-                    logger.info(f"Moved decrypted output to {dest_path}")
+                    if move_outputs:
+                        dest_path = output_folder / candidate.name
+                        if dest_path.exists():
+                            dest_path.unlink()
+                        shutil.move(str(candidate), str(dest_path))
+                        logger.info(f"Moved decrypted output to {dest_path}")
+                    else:
+                        logger.info(f"Preserved decrypted output in working directory: {candidate}")
                     moved_any = True
                 except Exception as e:
                     logger.error(f"Error moving decrypted output {candidate.name}: {e}")
 
         if moved_any:
-            return (True, f"Batch decryption completed and outputs were moved to {output_folder}")
+            if move_outputs:
+                return (True, f"Batch decryption completed and outputs were moved to {output_folder}")
+            return (True, f"Batch decryption completed and outputs were preserved in {script_dir}")
         return (False, "No decrypted output files were produced")
 
-    async def decrypt_rom_file(self, rom_name: str, output_folder: Optional[Path] = None, convert_to_cci: bool = False) -> tuple[bool, str, Optional[Path]]:
+    async def decrypt_rom_file(self, rom_name: str, output_folder: Optional[Path] = None, convert_to_cci: bool = False, move_outputs: bool = True) -> tuple[bool, str, Optional[Path]]:
         """Decrypt a ROM file using the batch script before conversion."""
         if output_folder is None:
             output_folder = self.output_folder
@@ -238,7 +296,7 @@ class ROMConverter:
             return (False, msg, None)
 
         logger.info(f"Preparing batch decryption for {source_file.name}")
-        success, msg = await self.run_batch_decrypt(output_folder, convert_to_cci=convert_to_cci)
+        success, msg = await self.run_batch_decrypt(output_folder, convert_to_cci=convert_to_cci, move_outputs=move_outputs)
         if not success:
             return (False, msg, None)
 
@@ -246,6 +304,62 @@ class ROMConverter:
         if output_path is None:
             return (False, "Batch decryption completed but no matching output file was found", None)
         return (True, msg, output_path)
+
+    def cleanup_working_dir(self, rom_name: str) -> None:
+        """
+        Remove leftover files from the batch script's working directory for rom_name.
+
+        run_batch_decrypt() copies the source ROM into the batch script's folder before
+        running it, and get_retry_input() calls decrypt_rom_file(..., move_outputs=False)
+        so it can inspect the result without moving anything. That combination leaves the
+        copied original ROM and any intermediate decrypted file sitting in that folder
+        even after the real output has been collected. Call this once the needed output
+        has been safely moved elsewhere.
+        """
+        batch_script = self.get_batch_script_path()
+        if batch_script is None:
+            return
+        script_dir = batch_script.parent
+
+        normalized_rom_name = rom_name.lower().replace("-decrypted", "")
+        name_variants = {v for v in {
+            rom_name.lower(),
+            normalized_rom_name,
+        } if v}
+
+        for candidate in script_dir.glob("*"):
+            if not candidate.is_file():
+                continue
+            name_lower = candidate.name.lower()
+            if name_lower in {"batch cia 3ds decryptor redux.bat", "batch cia 3ds decryptor.bat"}:
+                continue
+            if candidate.suffix.lower() not in {".cia", ".cci", ".3ds"}:
+                continue
+            stem_lower = candidate.stem.lower()
+            if stem_lower in name_variants or any(v in stem_lower for v in name_variants):
+                try:
+                    candidate.unlink()
+                    logger.info(f"Cleaned up leftover working file: {candidate}")
+                except Exception as e:
+                    logger.warning(f"Could not remove leftover file {candidate}: {e}")
+
+    async def get_retry_input(self, rom_name: str, output_folder: Path, original_input: Path) -> Path:
+        """Try the batch-based decrypt flow and return a decrypted intermediate if available."""
+        for convert_to_cci in (True, False):
+            decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(
+                rom_name,
+                output_folder,
+                convert_to_cci=convert_to_cci,
+                move_outputs=False,
+            )
+            if decrypt_success and decrypted_path is not None and decrypted_path.exists():
+                logger.info(f"Using decrypted retry input from batch flow: {decrypted_path}")
+                return decrypted_path
+            if not decrypt_success:
+                logger.warning(f"Decrypt-first retry attempt failed: {decrypt_msg}")
+
+        logger.info(f"No decrypted retry input found; falling back to original input: {original_input}")
+        return original_input
     
     async def cci_to_cia(self, rom_name: str, output_folder: Optional[Path] = None) -> tuple[bool, str]:
         """Convert CCI to CIA, retrying after decryption if the initial conversion fails."""
@@ -259,26 +373,26 @@ class ROMConverter:
             return (False, msg)
         
         in_file = self.get_rom_path(f"{rom_name}.cci")
-        command = f"makerom -ccitocia \"{in_file}\""
+        command = f'"{self.makerom_exe}" -ccitocia "{in_file}"'
         
         logger.info("Beginning CCI to CIA conversion!")
         return_code, stdout, stderr = await self.run_command(command)
         
         if return_code != 0:
             logger.warning("Initial CCI to CIA conversion failed; attempting decrypt-first retry...")
-            decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(rom_name, output_folder, convert_to_cci=False)
-            retry_input = decrypted_path if decrypt_success and decrypted_path is not None and decrypted_path.exists() else in_file
+            retry_input = await self.get_retry_input(rom_name, output_folder, in_file)
             if retry_input != in_file:
                 logger.info(f"Using decrypted input for retry: {retry_input}")
-            retry_command = f"makerom -ccitocia \"{retry_input}\""
+            retry_command = f'"{self.makerom_exe}" -ccitocia "{retry_input}"'
             return_code, stdout, stderr = await self.run_command(retry_command)
             if return_code != 0:
-                msg = f"Conversion failed after decrypt retry: {stderr or decrypt_msg}"
+                msg = f"Conversion failed after decrypt retry: {stderr or 'No detailed error output was produced.'}"
                 logger.error(msg)
                 return (False, msg)
         
         success = await self.move_converted_file(rom_name, original_ext, output_folder)
         if success:
+            self.cleanup_working_dir(rom_name)
             msg = "CCI to CIA conversion completed successfully!"
         else:
             msg = "Conversion completed but file move failed"
@@ -298,26 +412,50 @@ class ROMConverter:
             return (False, msg)
         
         in_file = self.get_rom_path(f"{rom_name}.cia")
-        command = f"makerom -ciatocci \"{in_file}\""
+        command = f'"{self.makerom_exe}" -ciatocci "{in_file}"'
         
         logger.info("Beginning CIA to CCI conversion!")
         return_code, stdout, stderr = await self.run_command(command)
         
         if return_code != 0:
             logger.warning("Initial CIA to CCI conversion failed; attempting decrypt-first retry...")
-            decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(rom_name, output_folder, convert_to_cci=False)
-            retry_input = decrypted_path if decrypt_success and decrypted_path is not None and decrypted_path.exists() else in_file
+            retry_input = await self.get_retry_input(rom_name, output_folder, in_file)
             if retry_input != in_file:
                 logger.info(f"Using decrypted input for retry: {retry_input}")
-            retry_command = f"makerom -ciatocci \"{retry_input}\""
+
+            if retry_input.suffix.lower() == ".cci":
+                # get_retry_input's decrypt-first attempt (convert_to_cci=True) asks the
+                # batch script to decrypt AND pack the CCI itself, so retry_input here is
+                # already a finished .cci -- not a decrypted .cia. Feeding a .cci back into
+                # "makerom -ciatocci" is invalid and is what produced the makerom error.
+                # There's nothing left for makerom to do, so just use this file directly.
+                logger.info("Decrypt retry already produced a finished CCI; using it directly instead of calling makerom again.")
+                dest_path = output_folder / f"{rom_name}.cci"
+                try:
+                    output_folder.mkdir(parents=True, exist_ok=True)
+                    if dest_path.exists():
+                        dest_path.unlink()
+                    if retry_input.resolve() != dest_path.resolve():
+                        shutil.move(str(retry_input), str(dest_path))
+                    self.cleanup_working_dir(rom_name)
+                    msg = "CIA to CCI conversion completed successfully (via decrypt-first flow)!"
+                    logger.info(msg)
+                    return (True, msg)
+                except Exception as e:
+                    msg = f"Decrypted CCI produced but failed to move into place: {e}"
+                    logger.error(msg)
+                    return (False, msg)
+
+            retry_command = f'"{self.makerom_exe}" -ciatocci "{retry_input}"'
             return_code, stdout, stderr = await self.run_command(retry_command)
             if return_code != 0:
-                msg = f"Conversion failed after decrypt retry: {stderr or decrypt_msg}"
+                msg = f"Conversion failed after decrypt retry: {stderr or 'No detailed error output was produced.'}"
                 logger.error(msg)
                 return (False, msg)
         
         success = await self.move_converted_file(rom_name, original_ext, output_folder)
         if success:
+            self.cleanup_working_dir(rom_name)
             msg = "CIA to CCI conversion completed successfully!"
         else:
             msg = "Conversion completed but file move failed"
@@ -354,7 +492,7 @@ class ROMConverter:
             return (False, msg)
         
         logger.info("Beginning batch-based CIA decrypt and conversion flow...")
-        decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(rom_name, output_folder, convert_to_cci=True)
+        decrypt_success, decrypt_msg, decrypted_path = await self.decrypt_rom_file(rom_name, output_folder, convert_to_cci=True, move_outputs=True)
         if decrypt_success and decrypted_path is not None and decrypted_path.exists():
             msg = f"CIA to decrypted output completed: {decrypted_path.name}"
             logger.info(msg)
